@@ -7,7 +7,7 @@ import { initMemory } from './games/memory.js';
 import { initTic } from './games/tictactoe.js';
 
 // Import config and feature modules
-import { firebaseConfig, ADMIN_USERNAME } from './config.js';
+import { firebaseConfig, ADMIN_USERNAME, AUTH_PROVIDERS } from './config.js';
 import { validateUsername, validateEmail, isUsernameBanned } from './moderation.js';
 import { initFriends, updateOnlineStatus, sendFriendRequest, getFriendRequests, acceptFriendRequest, rejectFriendRequest } from './friends.js';
 import { initChat, openChatModal, getUserChats } from './chat.js';
@@ -108,6 +108,65 @@ async function loginUser(email, password) {
   }
 }
 
+// Social login functions
+async function loginWithGoogle() {
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const result = await auth.signInWithPopup(provider);
+    await handleSocialLogin(result.user);
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur connexion Google:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function loginWithFacebook() {
+  try {
+    const provider = new firebase.auth.FacebookAuthProvider();
+    const result = await auth.signInWithPopup(provider);
+    await handleSocialLogin(result.user);
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur connexion Facebook:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+async function loginWithMicrosoft() {
+  try {
+    const provider = new firebase.auth.OAuthProvider('microsoft.com');
+    const result = await auth.signInWithPopup(provider);
+    await handleSocialLogin(result.user);
+    return { success: true };
+  } catch (error) {
+    console.error('Erreur connexion Microsoft:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Handle social login (create user profile if first time)
+async function handleSocialLogin(user) {
+  const userRef = db.ref(`users/${user.uid}`);
+  const snapshot = await userRef.once('value');
+  
+  if (!snapshot.exists()) {
+    // First time login - create profile
+    const username = user.displayName || user.email.split('@')[0] || 'Joueur';
+    await userRef.set({
+      username: username,
+      email: user.email,
+      photoURL: user.photoURL || null,
+      provider: user.providerData[0].providerId,
+      createdAt: Date.now(),
+      stats: {
+        gamesPlayed: 0,
+        totalScore: 0
+      }
+    });
+  }
+}
+
 function logoutUser() {
   auth.signOut();
 }
@@ -123,7 +182,7 @@ function showAuthModal() {
   modal.innerHTML = `
     <div class="auth-container">
       <div class="auth-header">
-        <h2>🎮 GameHub Arcade</h2>
+        <h2>🎮 GameHub Arcade Pro</h2>
         <p>Connectez-vous pour sauvegarder vos scores !</p>
       </div>
       
@@ -142,6 +201,16 @@ function showAuthModal() {
         </div>
         <button type="submit" class="auth-btn">Se connecter</button>
         <div class="auth-error" id="login-error"></div>
+        
+        <div class="auth-divider">
+          <span>ou continuer avec</span>
+        </div>
+        
+        <div class="social-login-buttons">
+          ${AUTH_PROVIDERS.GOOGLE ? '<button type="button" class="social-btn google-btn" id="google-login"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google"> Google</button>' : ''}
+          ${AUTH_PROVIDERS.FACEBOOK ? '<button type="button" class="social-btn facebook-btn" id="facebook-login"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="white" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg> Facebook</button>' : ''}
+          ${AUTH_PROVIDERS.MICROSOFT ? '<button type="button" class="social-btn microsoft-btn" id="microsoft-login"><svg viewBox="0 0 23 23" width="18" height="18"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg> Microsoft</button>' : ''}
+        </div>
       </form>
       
       <!-- Register Form -->
@@ -160,10 +229,20 @@ function showAuthModal() {
         </div>
         <button type="submit" class="auth-btn">Créer un compte</button>
         <div class="auth-error" id="register-error"></div>
+        
+        <div class="auth-divider">
+          <span>ou s'inscrire avec</span>
+        </div>
+        
+        <div class="social-login-buttons">
+          ${AUTH_PROVIDERS.GOOGLE ? '<button type="button" class="social-btn google-btn" id="google-register"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google"> Google</button>' : ''}
+          ${AUTH_PROVIDERS.FACEBOOK ? '<button type="button" class="social-btn facebook-btn" id="facebook-register"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="white" d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg> Facebook</button>' : ''}
+          ${AUTH_PROVIDERS.MICROSOFT ? '<button type="button" class="social-btn microsoft-btn" id="microsoft-register"><svg viewBox="0 0 23 23" width="18" height="18"><path fill="#f3f3f3" d="M0 0h23v23H0z"/><path fill="#f35325" d="M1 1h10v10H1z"/><path fill="#81bc06" d="M12 1h10v10H12z"/><path fill="#05a6f0" d="M1 12h10v10H1z"/><path fill="#ffba08" d="M12 12h10v10H12z"/></svg> Microsoft</button>' : ''}
+        </div>
       </form>
       
       <div class="auth-footer">
-        <small>Vos mots de passe sont cryptés et sécurisés par Firebase Auth</small>
+        <small>Vos données sont sécurisées par Firebase Auth</small>
       </div>
     </div>
   `;
@@ -237,6 +316,62 @@ function setupAuthModalEvents() {
       errorDiv.textContent = getErrorMessage(result.error);
     }
   });
+  
+  // Social login buttons (login form)
+  if (AUTH_PROVIDERS.GOOGLE) {
+    document.getElementById('google-login')?.addEventListener('click', async () => {
+      const result = await loginWithGoogle();
+      if (!result.success) {
+        document.getElementById('login-error').textContent = getErrorMessage(result.error);
+      }
+    });
+  }
+  
+  if (AUTH_PROVIDERS.FACEBOOK) {
+    document.getElementById('facebook-login')?.addEventListener('click', async () => {
+      const result = await loginWithFacebook();
+      if (!result.success) {
+        document.getElementById('login-error').textContent = getErrorMessage(result.error);
+      }
+    });
+  }
+  
+  if (AUTH_PROVIDERS.MICROSOFT) {
+    document.getElementById('microsoft-login')?.addEventListener('click', async () => {
+      const result = await loginWithMicrosoft();
+      if (!result.success) {
+        document.getElementById('login-error').textContent = getErrorMessage(result.error);
+      }
+    });
+  }
+  
+  // Social login buttons (register form - same handlers)
+  if (AUTH_PROVIDERS.GOOGLE) {
+    document.getElementById('google-register')?.addEventListener('click', async () => {
+      const result = await loginWithGoogle();
+      if (!result.success) {
+        document.getElementById('register-error').textContent = getErrorMessage(result.error);
+      }
+    });
+  }
+  
+  if (AUTH_PROVIDERS.FACEBOOK) {
+    document.getElementById('facebook-register')?.addEventListener('click', async () => {
+      const result = await loginWithFacebook();
+      if (!result.success) {
+        document.getElementById('register-error').textContent = getErrorMessage(result.error);
+      }
+    });
+  }
+  
+  if (AUTH_PROVIDERS.MICROSOFT) {
+    document.getElementById('microsoft-register')?.addEventListener('click', async () => {
+      const result = await loginWithMicrosoft();
+      if (!result.success) {
+        document.getElementById('register-error').textContent = getErrorMessage(result.error);
+      }
+    });
+  }
 }
 
 function getErrorMessage(error) {
