@@ -1,31 +1,41 @@
-// Main app bootstrap — module
+// GameHub Arcade Pro - Main Application
+// Plateforme de jeux sociale complète avec Firebase
+
+// Import game modules
 import { initGuess } from './games/guess.js';
 import { initMemory } from './games/memory.js';
 import { initTic } from './games/tictactoe.js';
 
-// Firebase config for GameHub Arcade
-// TODO: Replace with your actual Firebase project config
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY_HERE",
-  authDomain: "gamehub-arcade.firebaseapp.com", 
-  databaseURL: "https://gamehub-arcade-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "gamehub-arcade",
-  storageBucket: "gamehub-arcade.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
+// Import config and feature modules
+import { firebaseConfig, ADMIN_USERNAME } from './config.js';
+import { validateUsername, validateEmail, isUsernameBanned } from './moderation.js';
+import { initFriends, updateOnlineStatus, sendFriendRequest, getFriendRequests, acceptFriendRequest, rejectFriendRequest } from './friends.js';
+import { initChat, openChatModal, getUserChats } from './chat.js';
+import { initAdmin } from './admin.js';
+import { initLeaderboard, loadLeaderboards as loadLeaderboardsModule, submitScore as submitScoreModule } from './leaderboard.js';
 
-// Initialize Firebase (compat loaded in page)
+// Initialize Firebase (compat loaded in HTML)
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.database();
+const storage = firebase.storage();
 
 const state = { 
   user: null, 
   uid: null, 
   username: null,
-  showingAuth: false 
+  showingAuth: false,
+  favoriteGames: [],
+  pinnedGames: []
 };
+
+// Initialize all modules when Firebase is ready
+document.addEventListener('DOMContentLoaded', () => {
+  initFriends(db, auth);
+  initChat(db, auth);
+  initAdmin(db, auth);
+  initLeaderboard(db, auth);
+});
 
 // Authentication state management
 auth.onAuthStateChanged(async user => {
@@ -424,7 +434,7 @@ function setupProfileModalEvents() {
   });
 }
 
-// Enhanced score submission with user data
+// Export for global access
 export function submitScore(game, score, customName = null){
   if (!state.uid) {
     console.warn('User not logged in, cannot submit score');
@@ -448,3 +458,455 @@ export function submitScore(game, score, customName = null){
   
   return db.ref(`leaderboards/${game}`).push(payload);
 }
+
+// ========== NEW FEATURES ==========
+
+// Friends button handler
+document.getElementById('friends-btn')?.addEventListener('click', showFriendsModal);
+
+function showFriendsModal() {
+  const modal = document.createElement('div');
+  modal.id = 'friends-modal';
+  modal.className = 'auth-modal';
+  modal.innerHTML = `
+    <div class="auth-container">
+      <div class="auth-header">
+        <h2>👥 Amis</h2>
+        <button class="close-btn" onclick="this.closest('.auth-modal').remove()">✕</button>
+      </div>
+      
+      <div class="friends-tabs">
+        <button class="tab-btn active" data-tab="list">Liste d'amis</button>
+        <button class="tab-btn" data-tab="requests">Demandes</button>
+        <button class="tab-btn" data-tab="add">Ajouter</button>
+      </div>
+      
+      <!-- Friends List Tab -->
+      <div id="friends-list-tab" class="friends-tab active">
+        <div id="friends-list-container"></div>
+      </div>
+      
+      <!-- Requests Tab -->
+      <div id="friends-requests-tab" class="friends-tab">
+        <div id="requests-container"></div>
+      </div>
+      
+      <!-- Add Friend Tab -->
+      <div id="friends-add-tab" class="friends-tab">
+        <div class="input-group">
+          <input type="text" id="friend-username-input" placeholder="Pseudo de l'utilisateur" maxlength="20">
+        </div>
+        <button onclick="window.sendFriendRequestFromModal()" class="auth-btn">Envoyer une demande</button>
+        <div class="auth-error" id="friend-add-error"></div>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  setupFriendsModalEvents();
+  loadFriendsData();
+}
+
+function setupFriendsModalEvents() {
+  document.querySelectorAll('.friends-tabs .tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      
+      document.querySelectorAll('.friends-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.friends-tab').forEach(t => t.classList.remove('active'));
+      
+      btn.classList.add('active');
+      document.getElementById(`friends-${tab}-tab`).classList.add('active');
+      
+      if (tab === 'list') loadFriendsList();
+      else if (tab === 'requests') loadFriendRequests();
+    });
+  });
+}
+
+async function loadFriendsData() {
+  loadFriendsList();
+  loadFriendRequests();
+}
+
+async function loadFriendsList() {
+  const container = document.getElementById('friends-list-container');
+  if (!container) return;
+  
+  container.innerHTML = '<div class="loading">Chargement...</div>';
+  
+  try {
+    const friendsSnap = await db.ref(`friends/${state.uid}`).once('value');
+    const friends = [];
+    
+    friendsSnap.forEach(child => {
+      friends.push({
+        id: child.key,
+        ...child.val()
+      });
+    });
+    
+    if (friends.length === 0) {
+      container.innerHTML = '<p class="empty-state">Aucun ami pour le moment</p>';
+      return;
+    }
+    
+    container.innerHTML = friends.map(friend => `
+      <div class="friend-item">
+        <div class="friend-info">
+          <div class="friend-avatar">👤</div>
+          <div class="friend-details">
+            <div class="friend-name">${escapeHtml(friend.username)}</div>
+            <div class="friend-status ${friend.status || 'offline'}">${friend.status === 'online' ? '🟢 En ligne' : '⚫ Hors ligne'}</div>
+          </div>
+        </div>
+        <div class="friend-actions">
+          <button class="btn-icon" onclick="window.openChat('${friend.id}')" title="Envoyer un message">💬</button>
+          <button class="btn-icon" onclick="window.sendGameInvite('${friend.id}', 'tictactoe')" title="Inviter à jouer">🎮</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (error) {
+    container.innerHTML = `<p class="error-state">Erreur: ${error.message}</p>`;
+  }
+}
+
+async function loadFriendRequests() {
+  const container = document.getElementById('requests-container');
+  if (!container) return;
+  
+  container.innerHTML = '<div class="loading">Chargement...</div>';
+  
+  try {
+    const requestsSnap = await db.ref(`friendRequests/${state.uid}`).once('value');
+    const requests = [];
+    
+    requestsSnap.forEach(child => {
+      requests.push({
+        id: child.key,
+        ...child.val()
+      });
+    });
+    
+    if (requests.length === 0) {
+      container.innerHTML = '<p class="empty-state">Aucune demande en attente</p>';
+      return;
+    }
+    
+    container.innerHTML = requests.map(request => `
+      <div class="request-item">
+        <div class="request-info">
+          <div class="friend-avatar">👤</div>
+          <div class="friend-name">${escapeHtml(request.username)}</div>
+        </div>
+        <div class="request-actions">
+          <button class="btn-success" onclick="window.acceptFriend('${request.id}')">✓ Accepter</button>
+          <button class="btn-danger" onclick="window.rejectFriend('${request.id}')">✕ Refuser</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (error) {
+    container.innerHTML = `<p class="error-state">Erreur: ${error.message}</p>`;
+  }
+}
+
+// Global functions for friends
+window.sendFriendRequestFromModal = async function() {
+  const username = document.getElementById('friend-username-input').value.trim();
+  const errorDiv = document.getElementById('friend-add-error');
+  
+  errorDiv.textContent = '';
+  
+  try {
+    await sendFriendRequest(username);
+    alert('Demande d\'ami envoyée !');
+    document.getElementById('friend-username-input').value = '';
+  } catch (error) {
+    errorDiv.textContent = error.message;
+  }
+};
+
+window.acceptFriend = async function(friendId) {
+  try {
+    await acceptFriendRequest(friendId);
+    loadFriendRequests();
+    loadFriendsList();
+  } catch (error) {
+    alert('Erreur: ' + error.message);
+  }
+};
+
+window.rejectFriend = async function(friendId) {
+  try {
+    await rejectFriendRequest(friendId);
+    loadFriendRequests();
+  } catch (error) {
+    alert('Erreur: ' + error.message);
+  }
+};
+
+window.sendGameInvite = async function(friendId, gameType) {
+  try {
+    const { sendGameInvite } = await import('./chat.js');
+    await sendGameInvite(friendId, gameType);
+    alert('Invitation envoyée !');
+  } catch (error) {
+    alert('Erreur: ' + error.message);
+  }
+};
+
+// Chat button handler
+document.getElementById('chat-btn')?.addEventListener('click', showChatsModal);
+
+async function showChatsModal() {
+  try {
+    const chats = await getUserChats();
+    
+    const modal = document.createElement('div');
+    modal.id = 'chats-modal';
+    modal.className = 'auth-modal';
+    modal.innerHTML = `
+      <div class="auth-container">
+        <div class="auth-header">
+          <h2>💬 Messages</h2>
+          <button class="close-btn" onclick="this.closest('.auth-modal').remove()">✕</button>
+        </div>
+        
+        <div id="chats-list">
+          ${chats.length === 0 ? '<p class="empty-state">Aucune conversation</p>' : 
+            chats.map(chat => {
+              const otherParticipant = Object.entries(chat.participants || {})
+                .find(([id]) => id !== state.uid)?.[1];
+              
+              return `
+                <div class="chat-item" onclick="window.openChat('${chat.id}')">
+                  <div class="chat-avatar">👤</div>
+                  <div class="chat-info">
+                    <div class="chat-name">${escapeHtml(otherParticipant?.username || 'Conversation')}</div>
+                    <div class="chat-last-message">${escapeHtml(chat.lastMessage?.text?.substring(0, 50) || '')}</div>
+                  </div>
+                  <div class="chat-time">${new Date(chat.lastMessage?.timestamp || 0).toLocaleDateString('fr-FR')}</div>
+                </div>
+              `;
+            }).join('')
+          }
+        </div>
+      </div>
+    `;
+    
+    document.body.appendChild(modal);
+  } catch (error) {
+    alert('Erreur: ' + error.message);
+  }
+}
+
+// Notifications button handler
+document.getElementById('notifications-btn')?.addEventListener('click', showNotificationsModal);
+
+async function showNotificationsModal() {
+  const modal = document.createElement('div');
+  modal.id = 'notifications-modal';
+  modal.className = 'auth-modal';
+  modal.innerHTML = `
+    <div class="auth-container">
+      <div class="auth-header">
+        <h2>🔔 Notifications</h2>
+        <button class="close-btn" onclick="this.closest('.auth-modal').remove()">✕</button>
+      </div>
+      <div id="notifications-list">
+        <div class="loading">Chargement...</div>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  loadNotifications();
+}
+
+async function loadNotifications() {
+  const container = document.getElementById('notifications-list');
+  if (!container) return;
+  
+  try {
+    const notifSnap = await db.ref(`notifications/${state.uid}`)
+      .orderByChild('timestamp')
+      .limitToLast(20)
+      .once('value');
+    
+    const notifs = [];
+    notifSnap.forEach(child => {
+      notifs.push({
+        id: child.key,
+        ...child.val()
+      });
+    });
+    
+    notifs.reverse();
+    
+    if (notifs.length === 0) {
+      container.innerHTML = '<p class="empty-state">Aucune notification</p>';
+      return;
+    }
+    
+    container.innerHTML = notifs.map(notif => {
+      const icons = {
+        friend_request: '👥',
+        friend_accepted: '✅',
+        new_message: '💬',
+        game_invite: '🎮',
+        group_message: '💬'
+      };
+      
+      return `
+        <div class="notif-item ${notif.read ? '' : 'unread'}">
+          <span class="notif-icon">${icons[notif.type] || '📢'}</span>
+          <div class="notif-content">
+            <div class="notif-text">${getNotificationText(notif)}</div>
+            <div class="notif-time">${new Date(notif.timestamp).toLocaleString('fr-FR')}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+    
+    // Mark all as read
+    const updates = {};
+    notifs.forEach(notif => {
+      if (!notif.read) {
+        updates[`notifications/${state.uid}/${notif.id}/read`] = true;
+      }
+    });
+    
+    if (Object.keys(updates).length > 0) {
+      await db.ref().update(updates);
+    }
+  } catch (error) {
+    container.innerHTML = `<p class="error-state">Erreur: ${error.message}</p>`;
+  }
+}
+
+function getNotificationText(notif) {
+  switch (notif.type) {
+    case 'friend_request':
+      return `<strong>${escapeHtml(notif.fromUsername)}</strong> vous a envoyé une demande d'ami`;
+    case 'friend_accepted':
+      return `<strong>${escapeHtml(notif.fromUsername)}</strong> a accepté votre demande d'ami`;
+    case 'new_message':
+      return `<strong>${escapeHtml(notif.fromUsername)}</strong> vous a envoyé un message`;
+    case 'game_invite':
+      return `<strong>${escapeHtml(notif.fromUsername)}</strong> vous invite à jouer`;
+    case 'group_message':
+      return `Nouveau message dans un groupe`;
+    default:
+      return 'Nouvelle notification';
+  }
+}
+
+// Game favorite/pin functionality
+document.querySelectorAll('.favorite-btn').forEach((btn, idx) => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const gameCard = btn.closest('.game-card');
+    const game = gameCard.dataset.game;
+    toggleFavorite(game, btn);
+  });
+});
+
+document.querySelectorAll('.pin-btn').forEach((btn, idx) => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const gameCard = btn.closest('.game-card');
+    const game = gameCard.dataset.game;
+    togglePin(game, btn);
+  });
+});
+
+async function toggleFavorite(game, btn) {
+  if (!state.uid) return;
+  
+  const favRef = db.ref(`users/${state.uid}/favoriteGames`);
+  const snapshot = await favRef.once('value');
+  const favorites = snapshot.val() || [];
+  
+  const index = favorites.indexOf(game);
+  
+  if (index > -1) {
+    favorites.splice(index, 1);
+    btn.classList.remove('active');
+  } else {
+    favorites.push(game);
+    btn.classList.add('active');
+  }
+  
+  await favRef.set(favorites);
+  state.favoriteGames = favorites;
+}
+
+async function togglePin(game, btn) {
+  if (!state.uid) return;
+  
+  const pinRef = db.ref(`users/${state.uid}/pinnedGames`);
+  const snapshot = await pinRef.once('value');
+  const pinned = snapshot.val() || [];
+  
+  const index = pinned.indexOf(game);
+  
+  if (index > -1) {
+    pinned.splice(index, 1);
+    btn.classList.remove('active');
+  } else {
+    if (pinned.length >= 3) {
+      alert('Vous ne pouvez épingler que 3 jeux maximum');
+      return;
+    }
+    pinned.push(game);
+    btn.classList.add('active');
+  }
+  
+  await pinRef.set(pinned);
+  state.pinnedGames = pinned;
+}
+
+// Load user game preferences
+async function loadGamePreferences() {
+  if (!state.uid) return;
+  
+  const snapshot = await db.ref(`users/${state.uid}`).once('value');
+  const userData = snapshot.val() || {};
+  
+  state.favoriteGames = userData.favoriteGames || [];
+  state.pinnedGames = userData.pinnedGames || [];
+  
+  // Update UI
+  state.favoriteGames.forEach(game => {
+    const card = document.querySelector(`[data-game="${game}"]`);
+    if (card) {
+      card.querySelector('.favorite-btn')?.classList.add('active');
+    }
+  });
+  
+  state.pinnedGames.forEach(game => {
+    const card = document.querySelector(`[data-game="${game}"]`);
+    if (card) {
+      card.querySelector('.pin-btn')?.classList.add('active');
+    }
+  });
+}
+
+// Online users counter
+setInterval(async () => {
+  try {
+    const usersSnap = await db.ref('users').once('value');
+    let onlineCount = 0;
+    
+    usersSnap.forEach(child => {
+      if (child.val().status === 'online') {
+        onlineCount++;
+      }
+    });
+    
+    document.getElementById('online-count').textContent = `👥 ${onlineCount} en ligne`;
+  } catch (error) {
+    console.error('Error counting online users:', error);
+  }
+}, 30000); // Update every 30 seconds
+
