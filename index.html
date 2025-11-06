@@ -3,48 +3,93 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hub de jeux — Collection Interactive</title>
+  <title>GameHub Arcade Pro — Plateforme de Jeux Sociale</title>
+  <meta name="description" content="Jouez, chattez et affrontez vos amis sur GameHub Arcade Pro. Classements, multijoueur, chat temps réel.">
   <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <meta name="theme-color" content="#667eea">
+  <link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
   <!-- Animated background particles -->
   <div id="particles"></div>
   
   <header>
-    <h1>🎮 GameHub Arcade</h1>
+    <div class="header-left">
+      <h1>🎮 GameHub Arcade Pro</h1>
+      <div class="header-stats">
+        <span id="online-count" class="stat-badge">👥 0 en ligne</span>
+      </div>
+    </div>
+    
     <div id="user-info">
       <span class="status-dot"></span>
       <span class="status-text">Chargement...</span>
       <div class="user-actions hidden" id="user-actions">
-        <button id="profile-btn" class="profile-btn">👤 Profil</button>
-        <button id="logout-btn" class="logout-btn">Se déconnecter</button>
+        <button id="friends-btn" class="action-btn" title="Amis">
+          👥 Amis
+          <span class="badge hidden" id="friend-requests-badge">0</span>
+        </button>
+        <button id="chat-btn" class="action-btn" title="Messages">
+          💬 Chat
+          <span class="badge hidden" id="chat-unread-badge">0</span>
+        </button>
+        <button id="notifications-btn" class="action-btn" title="Notifications">
+          🔔
+          <span class="badge hidden" id="notifications-badge">0</span>
+        </button>
+        <button id="profile-btn" class="action-btn">👤 Profil</button>
+        <button id="logout-btn" class="logout-btn">Déconnexion</button>
       </div>
     </div>
   </header>
 
   <main>
     <nav class="games-list">
+      <div class="games-header">
+        <h2>🎯 Jeux Disponibles</h2>
+        <div class="games-filter">
+          <button class="filter-btn active" data-filter="all">Tous</button>
+          <button class="filter-btn" data-filter="favorite">⭐ Favoris</button>
+          <button class="filter-btn" data-filter="pinned">📌 Épinglés</button>
+        </div>
+      </div>
+      
       <button data-game="guess" class="game-card">
         <div class="game-icon">🎯</div>
         <div class="game-info">
           <h3>Devine le nombre</h3>
           <p>Logique & déduction</p>
         </div>
+        <div class="game-actions">
+          <button class="game-action-btn favorite-btn" title="Ajouter aux favoris">⭐</button>
+          <button class="game-action-btn pin-btn" title="Épingler">📌</button>
+        </div>
       </button>
+      
       <button data-game="memory" class="game-card">
         <div class="game-icon">🧠</div>
         <div class="game-info">
           <h3>Memory</h3>
           <p>Mémoire & concentration</p>
         </div>
+        <div class="game-actions">
+          <button class="game-action-btn favorite-btn" title="Ajouter aux favoris">⭐</button>
+          <button class="game-action-btn pin-btn" title="Épingler">📌</button>
+        </div>
       </button>
+      
       <button data-game="tictactoe" class="game-card">
         <div class="game-icon">⚔️</div>
         <div class="game-info">
           <h3>Morpion</h3>
           <p>Stratégie & multijoueur</p>
+        </div>
+        <div class="game-actions">
+          <button class="game-action-btn favorite-btn" title="Ajouter aux favoris">⭐</button>
+          <button class="game-action-btn pin-btn" title="Épingler">📌</button>
         </div>
       </button>
     </nav>
@@ -53,8 +98,9 @@
       <div class="welcome-screen">
         <div class="welcome-animation">
           <div class="floating-icon">🎲</div>
-          <h2>Bienvenue dans le Hub !</h2>
-          <p>Sélectionne un jeu dans le menu pour commencer ton aventure.</p>
+          <h2>Bienvenue sur GameHub Arcade Pro !</h2>
+          <p>Sélectionne un jeu pour commencer ton aventure.</p>
+          <p class="feature-highlight">✨ Nouveau : Système d'amis, chat en temps réel et classements avancés !</p>
         </div>
       </div>
     </section>
@@ -62,8 +108,35 @@
     <aside id="leaderboard">
       <div class="leaderboard-header">
         <h2>🏆 Classements</h2>
-        <div class="refresh-btn" id="refresh-leaderboard">↻</div>
+        <button class="leaderboard-settings-btn" id="leaderboard-settings">⚙️</button>
+        <button class="refresh-btn" id="refresh-leaderboard">↻</button>
       </div>
+      
+      <div class="leaderboard-filters" id="leaderboard-filters">
+        <div class="filter-group">
+          <label>Période</label>
+          <select id="period-filter" class="filter-select">
+            <option value="all">Tout le temps</option>
+            <option value="daily">Aujourd'hui</option>
+            <option value="weekly">Cette semaine</option>
+            <option value="monthly">Ce mois</option>
+            <option value="yearly">Cette année</option>
+          </select>
+        </div>
+        
+        <div class="filter-group">
+          <label>Vue</label>
+          <select id="scope-filter" class="filter-select">
+            <option value="global">Global</option>
+            <option value="friends">Amis uniquement</option>
+          </select>
+        </div>
+        
+        <div class="filter-group">
+          <input type="text" id="player-search" class="filter-input" placeholder="🔍 Rechercher un joueur...">
+        </div>
+      </div>
+      
       <div id="boards">
         <div class="loading-animation">
           <div class="spinner"></div>
@@ -75,18 +148,58 @@
 
   <footer>
     <div class="footer-content">
-      <span>✨ Fait avec passion • Firebase + GitHub Pages</span>
+      <span>✨ GameHub Arcade Pro • Firebase + GitHub Pages</span>
+      <button id="install-btn" class="install-btn hidden">📱 Installer l'app</button>
     </div>
   </footer>
 
-  <!-- Firebase (compat libs for simplicity) -->
+  <!-- Firebase (compat libs) -->
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-storage-compat.js"></script>
 
+  <!-- App modules -->
+  <script src="config.js" type="module"></script>
   <script src="app.js" type="module"></script>
+  <script src="moderation.js" type="module"></script>
+  <script src="friends.js" type="module"></script>
+  <script src="chat.js" type="module"></script>
+  <script src="admin.js" type="module"></script>
+  <script src="leaderboard.js" type="module"></script>
+  
+  <!-- Game modules -->
   <script src="games/guess.js" type="module"></script>
   <script src="games/memory.js" type="module"></script>
   <script src="games/tictactoe.js" type="module"></script>
+
+  <!-- Service Worker for PWA -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .then(reg => console.log('✅ Service Worker registered'))
+          .catch(err => console.log('❌ Service Worker registration failed', err));
+      });
+    }
+    
+    // Install prompt
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      document.getElementById('install-btn').classList.remove('hidden');
+    });
+    
+    document.getElementById('install-btn').addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        console.log(`User response: ${outcome}`);
+        deferredPrompt = null;
+        document.getElementById('install-btn').classList.add('hidden');
+      }
+    });
+  </script>
 </body>
 </html>
